@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Code Runner</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0d1117;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            color: #c9d1d9;
+            user-select: none;
+        }
+        #title {
+            font-size: 20px;
+            color: #e07040;
+            margin-bottom: 16px;
+            letter-spacing: 3px;
+        }
+        canvas {
+            display: block;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+        }
+        #hint {
+            margin-top: 12px;
+            font-size: 12px;
+            color: #484f58;
+        }
+    </style>
+</head>
+<body>
+    <div id="title">&gt; claude code runner _</div>
+    <canvas id="game"></canvas>
+    <div id="hint">SPACE / ↑ : 점프 &nbsp;·&nbsp; ↓ : 숙이기 &nbsp;·&nbsp; 터치 / 클릭도 가능</div>
+
+    <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    canvas.width = 800;
+    canvas.height = 300;
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const GROUND_Y = 242;
+
+    const COLOR = {
+        bg: '#0d1117',
+        ground: '#30363d',
+        groundDetail: '#1c2128',
+        playerBody: '#e07040',
+        playerDark: '#a04820',
+        playerLight: '#f5a070',
+        playerScreen: '#1c2128',
+        promptGreen: '#3fb950',
+        errorRed: '#f85149',
+        warnYellow: '#d29922',
+        infoBlue: '#58a6ff',
+        text: '#c9d1d9',
+        dim: '#484f58',
+        hiScore: '#6e7681',
+    };
+
+    // ── state ────────────────────────────────────────────────────────────────
+    let state = 'idle'; // idle | playing | gameover
+    let frame = 0;
+    let score = 0;
+    let hiScore = 0;
+    let speed = 0;
+    let groundOffset = 0;
+    let obstacles = [];
+    let particles = [];
+    let nextObstacleAt = 90;
+    let keys = {};
+
+    // ── player ───────────────────────────────────────────────────────────────
+    const player = {
+        x: 90,
+        y: GROUND_Y,
+        vy: 0,
+        onGround: true,
+        ducking: false,
+        legPhase: 0,
+
+        get h() { return this.ducking ? 28 : 52; },
+        get w() { return this.ducking ? 44 : 32; },
+
+        jump() {
+            if (this.onGround && !this.ducking) {
+                this.vy = -17;
+                this.onGround = false;
+                burst(this.x, GROUND_Y, COLOR.playerBody, 7);
+            }
+        },
+
+        duck(v) {
+            if (this.ducking === v) return;
+            this.ducking = v;
+        },
+
+        update() {
+            if (state === 'playing') this.legPhase += 0.28;
+            this.vy += 1.0;
+            this.y += this.vy;
+            if (this.y >= GROUND_Y) {
+                this.y = GROUND_Y;
+                this.vy = 0;
+                this.onGround = true;
+            }
+        },
+
+        hitbox() {
+            const pad = 7;
+            if (this.ducking) {
+                return { x: this.x - 20 + pad, y: this.y - 24 + pad, w: 40 - pad*2, h: 24 - pad };
+            }
+            return { x: this.x - 14 + pad, y: this.y - 52 + pad, w: 28 - pad*2, h: 52 - pad };
+        },
+
+        draw() {
+            ctx.save();
+            if (this.ducking) drawDuck(this.x, this.y);
+            else drawStand(this.x, this.y, this.legPhase, !this.onGround);
+            ctx.restore();
+        }
+    };
+
+    // ── draw character ────────────────────────────────────────────────────────
+    function rr(x, y, w, h, r) {
+        if (typeof r === 'number') r = { tl: r, tr: r, bl: r, br: r };
+        ctx.beginPath();
+        ctx.moveTo(x + r.tl, y);
+        ctx.lineTo(x + w - r.tr, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+        ctx.lineTo(x + w, y + h - r.br);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+        ctx.lineTo(x + r.bl, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+        ctx.lineTo(x, y + r.tl);
+        ctx.quadraticCurveTo(x, y, x + r.tl, y);
+        ctx.closePath();
+    }
+
+    function drawStand(x, y, phase, air) {
+        // arms
+        ctx.strokeStyle = COLOR.playerBody;
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        const swing = Math.sin(phase) * 9;
+        if (air) {
+            line(x - 13, y - 36, x - 22, y - 48);
+            line(x + 13, y - 36, x + 22, y - 48);
+        } else {
+            line(x - 13, y - 36, x - 22 + swing, y - 26);
+            line(x + 13, y - 36, x + 22 - swing, y - 26);
+        }
+
+        // body
+        ctx.fillStyle = COLOR.playerBody;
+        rr(x - 14, y - 46, 28, 34, 5); ctx.fill();
+        ctx.fillStyle = COLOR.playerDark;
+        rr(x - 14, y - 46 + 17, 28, 17, { tl:0, tr:0, bl:5, br:5 }); ctx.fill();
+
+        // screen on chest
+        ctx.fillStyle = COLOR.playerScreen;
+        rr(x - 9, y - 42, 18, 12, 2); ctx.fill();
+        ctx.fillStyle = COLOR.promptGreen;
+        ctx.font = 'bold 9px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('>_', x, y - 33);
+
+        // head
+        ctx.fillStyle = COLOR.playerLight;
+        rr(x - 12, y - 64, 24, 22, 8); ctx.fill();
+
+        // eyes
+        ctx.fillStyle = '#0d1117';
+        circle(x - 4, y - 55, 3.2); ctx.fill();
+        circle(x + 7, y - 55, 3.2); ctx.fill();
+        ctx.fillStyle = 'white';
+        circle(x - 3, y - 56, 1.2); ctx.fill();
+        circle(x + 8, y - 56, 1.2); ctx.fill();
+
+        // mouth (small smile)
+        ctx.strokeStyle = '#0d1117';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x + 1.5, y - 49, 4, 0.1, Math.PI - 0.1);
+        ctx.stroke();
+
+        // legs
+        ctx.strokeStyle = COLOR.playerDark;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        const l1 = air ? 0 : Math.sin(phase) * 11;
+        const l2 = air ? 0 : Math.sin(phase + Math.PI) * 11;
+        if (air) {
+            line(x - 5, y - 12, x - 9, y - 4);
+            line(x + 5, y - 12, x + 9, y - 4);
+        } else {
+            line(x - 5, y - 12, x - 5 + l1, y);
+            line(x + 5, y - 12, x + 5 + l2, y);
+        }
+    }
+
+    function drawDuck(x, y) {
+        // body
+        ctx.fillStyle = COLOR.playerBody;
+        rr(x - 20, y - 24, 40, 20, 5); ctx.fill();
+        ctx.fillStyle = COLOR.playerDark;
+        rr(x - 20, y - 24 + 10, 40, 10, { tl:0, tr:0, bl:5, br:5 }); ctx.fill();
+
+        // screen
+        ctx.fillStyle = COLOR.playerScreen;
+        rr(x - 8, y - 21, 14, 8, 2); ctx.fill();
+        ctx.fillStyle = COLOR.promptGreen;
+        ctx.font = 'bold 7px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText('>_', x - 1, y - 15);
+
+        // head (side)
+        ctx.fillStyle = COLOR.playerLight;
+        rr(x + 12, y - 28, 18, 16, 6); ctx.fill();
+
+        // eye
+        ctx.fillStyle = '#0d1117';
+        circle(x + 25, y - 21, 2.5); ctx.fill();
+        ctx.fillStyle = 'white';
+        circle(x + 26, y - 22, 1); ctx.fill();
+
+        // legs
+        ctx.strokeStyle = COLOR.playerDark;
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        line(x - 8, y - 4, x - 12, y);
+        line(x + 4, y - 4, x + 8, y);
+    }
+
+    function circle(x, y, r) {
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    }
+    function line(x1, y1, x2, y2) {
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+
+    // ── obstacles ─────────────────────────────────────────────────────────────
+    const BUG_LABELS  = ['ERR', 'BUG', 'NaN', '404', '500', 'NULL'];
+    const FLY_LABELS  = ['WARN', 'TODO', 'FIXME', 'HACK'];
+    const FLY_HEIGHTS = [GROUND_Y - 75, GROUND_Y - 110, GROUND_Y - 145];
+
+    function makeObstacle() {
+        const flying = score > 200 && Math.random() < 0.3;
+        if (flying) {
+            return {
+                type: 'fly',
+                x: W + 20,
+                y: FLY_HEIGHTS[Math.floor(Math.random() * FLY_HEIGHTS.length)],
+                w: 52, h: 20,
+                label: FLY_LABELS[Math.floor(Math.random() * FLY_LABELS.length)],
+                phase: 0,
+            };
+        }
+        // ground bug — vary size
+        const sizes = [[18, 38], [22, 52], [18, 28]];
+        const [bw, bh] = sizes[Math.floor(Math.random() * sizes.length)];
+        return {
+            type: 'bug',
+            x: W + 20,
+            y: GROUND_Y - bh,
+            w: bw, h: bh,
+            label: BUG_LABELS[Math.floor(Math.random() * BUG_LABELS.length)],
+        };
+    }
+
+    function drawObstacle(o) {
+        if (o.type === 'bug') {
+            ctx.fillStyle = COLOR.errorRed;
+            rr(o.x, o.y, o.w, o.h, 4); ctx.fill();
+            ctx.fillStyle = 'rgba(0,0,0,0.25)';
+            rr(o.x, o.y + o.h * 0.55, o.w, o.h * 0.45, { tl:0, tr:0, bl:4, br:4 }); ctx.fill();
+            // legs
+            ctx.strokeStyle = '#c0392b';
+            ctx.lineWidth = 1.5;
+            for (let i = 0; i < 3; i++) {
+                const ly = o.y + o.h * 0.25 + i * (o.h * 0.22);
+                line(o.x, ly, o.x - 5, ly + 4);
+                line(o.x + o.w, ly, o.x + o.w + 5, ly + 4);
+            }
+            // label
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${o.h > 42 ? 10 : 8}px Courier New`;
+            ctx.textAlign = 'center';
+            ctx.fillText(o.label, o.x + o.w / 2, o.y + o.h * 0.72);
+        } else {
+            // flying
+            o.phase = (o.phase || 0) + 0.14;
+            const cx = o.x + o.w / 2;
+            const cy = o.y + o.h / 2;
+            const flap = Math.sin(o.phase) * 5;
+
+            ctx.fillStyle = COLOR.warnYellow;
+            // left wing
+            ctx.beginPath();
+            ctx.moveTo(cx - 26, cy + flap);
+            ctx.lineTo(cx - 5, cy - 6);
+            ctx.lineTo(cx - 5, cy + 5);
+            ctx.closePath(); ctx.fill();
+            // right wing
+            ctx.beginPath();
+            ctx.moveTo(cx + 26, cy + flap);
+            ctx.lineTo(cx + 5, cy - 6);
+            ctx.lineTo(cx + 5, cy + 5);
+            ctx.closePath(); ctx.fill();
+            // body
+            ctx.fillStyle = COLOR.warnYellow;
+            rr(cx - 14, cy - 8, 28, 16, 5); ctx.fill();
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            rr(cx - 14, cy + 2, 28, 6, { tl:0, tr:0, bl:5, br:5 }); ctx.fill();
+            ctx.fillStyle = '#0d1117';
+            ctx.font = 'bold 8px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText(o.label, cx, cy + 3);
+        }
+    }
+
+    function obsHitbox(o) {
+        const pad = 5;
+        return { x: o.x + pad, y: o.y + pad, w: o.w - pad*2, h: o.h - pad*2 };
+    }
+
+    // ── particles ─────────────────────────────────────────────────────────────
+    function burst(x, y, color, n) {
+        for (let i = 0; i < n; i++) {
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 7,
+                vy: -Math.random() * 7 - 1,
+                life: 1,
+                color,
+                s: Math.random() * 4 + 2,
+            });
+        }
+    }
+
+    function updateParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.x += p.vx; p.y += p.vy;
+            p.vy += 0.35; p.life -= 0.05;
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    function drawParticles() {
+        for (const p of particles) {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x - p.s/2, p.y - p.s/2, p.s, p.s);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // ── ground ────────────────────────────────────────────────────────────────
+    function drawGround() {
+        ctx.strokeStyle = COLOR.ground;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, GROUND_Y + 2); ctx.lineTo(W, GROUND_Y + 2);
+        ctx.stroke();
+
+        // dashes
+        ctx.strokeStyle = COLOR.groundDetail;
+        ctx.lineWidth = 1;
+        const dw = 28, gap = 55;
+        const off = groundOffset % (dw + gap);
+        for (let x = -off; x < W; x += dw + gap) {
+            ctx.beginPath();
+            ctx.moveTo(x, GROUND_Y + 10); ctx.lineTo(x + dw, GROUND_Y + 10);
+            ctx.stroke();
+        }
+    }
+
+    // ── HUD ───────────────────────────────────────────────────────────────────
+    function drawHUD() {
+        ctx.textAlign = 'right';
+        ctx.fillStyle = COLOR.hiScore;
+        ctx.font = '13px Courier New';
+        ctx.fillText('HI ' + String(hiScore).padStart(5, '0'), W - 12, 26);
+        ctx.fillStyle = COLOR.text;
+        ctx.font = 'bold 15px Courier New';
+        ctx.fillText(String(score).padStart(5, '0'), W - 12, 46);
+    }
+
+    // ── overlap ───────────────────────────────────────────────────────────────
+    function overlap(a, b) {
+        return a.x < b.x + b.w && a.x + a.w > b.x &&
+               a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    // ── overlays ──────────────────────────────────────────────────────────────
+    function drawIdle() {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = COLOR.text;
+        ctx.font = 'bold 18px Courier New';
+        ctx.fillText('PRESS SPACE TO START', W/2, H/2 - 16);
+        ctx.fillStyle = COLOR.dim;
+        ctx.font = '13px Courier New';
+        ctx.fillText('$ claude --run runner.js', W/2, H/2 + 10);
+    }
+
+    function drawGameover() {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = COLOR.errorRed;
+        ctx.font = 'bold 20px Courier New';
+        ctx.fillText('✖  UNCAUGHT EXCEPTION', W/2, H/2 - 28);
+        ctx.fillStyle = COLOR.text;
+        ctx.font = '13px Courier New';
+        ctx.fillText('score: ' + score + '   best: ' + hiScore, W/2, H/2 + 0);
+        ctx.fillStyle = COLOR.promptGreen;
+        ctx.font = 'bold 13px Courier New';
+        ctx.fillText('PRESS SPACE TO RETRY', W/2, H/2 + 24);
+    }
+
+    // ── reset ─────────────────────────────────────────────────────────────────
+    function reset() {
+        state = 'playing';
+        frame = 0; score = 0; speed = 6;
+        groundOffset = 0;
+        obstacles = []; particles = [];
+        nextObstacleAt = 90;
+        player.y = GROUND_Y; player.vy = 0;
+        player.onGround = true; player.legPhase = 0;
+        player.duck(false);
+    }
+
+    // ── main loop ─────────────────────────────────────────────────────────────
+    function update() {
+        if (state !== 'playing') return;
+
+        frame++;
+        score = Math.floor(frame / 6);
+        if (score > hiScore) hiScore = score;
+
+        speed = 6 + Math.min(score * 0.012, 8);
+        groundOffset += speed;
+
+        // spawn
+        if (frame >= nextObstacleAt) {
+            obstacles.push(makeObstacle());
+            const interval = Math.max(38, 90 - score * 0.08);
+            nextObstacleAt = frame + interval + Math.random() * 55;
+        }
+
+        // move obstacles
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            obstacles[i].x -= speed;
+            if (obstacles[i].x + obstacles[i].w < 0) obstacles.splice(i, 1);
+        }
+
+        // duck from held key
+        player.duck(!!keys['ArrowDown']);
+        player.update();
+
+        // collision
+        const ph = player.hitbox();
+        for (const o of obstacles) {
+            if (overlap(ph, obsHitbox(o))) {
+                state = 'gameover';
+                burst(player.x, player.y - 20, COLOR.errorRed, 22);
+                return;
+            }
+        }
+
+        updateParticles();
+    }
+
+    function draw() {
+        ctx.fillStyle = COLOR.bg;
+        ctx.fillRect(0, 0, W, H);
+
+        drawGround();
+
+        for (const o of obstacles) {
+            ctx.save(); drawObstacle(o); ctx.restore();
+        }
+
+        player.draw();
+        drawParticles();
+        drawHUD();
+
+        if (state === 'idle')     drawIdle();
+        if (state === 'gameover') drawGameover();
+    }
+
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    // ── controls ──────────────────────────────────────────────────────────────
+    function onPress() {
+        if (state === 'idle' || state === 'gameover') reset();
+        else player.jump();
+    }
+
+    document.addEventListener('keydown', e => {
+        keys[e.code] = true;
+        if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); onPress(); }
+        if (e.code === 'ArrowDown') e.preventDefault();
+    });
+    document.addEventListener('keyup', e => { keys[e.code] = false; });
+    canvas.addEventListener('click', onPress);
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); onPress(); }, { passive: false });
+
+    loop();
+    </script>
+</body>
+</html>
