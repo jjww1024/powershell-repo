@@ -54,10 +54,6 @@
         bg: '#0d1117',
         ground: '#30363d',
         groundDetail: '#1c2128',
-        playerBody: '#e07040',
-        playerDark: '#a04820',
-        playerLight: '#f5a070',
-        playerScreen: '#1c2128',
         promptGreen: '#3fb950',
         errorRed: '#f85149',
         warnYellow: '#d29922',
@@ -65,6 +61,17 @@
         text: '#c9d1d9',
         dim: '#484f58',
         hiScore: '#6e7681',
+    };
+
+    // ── Pikachu palette ───────────────────────────────────────────────────────
+    const PIK = {
+        y:  '#F8D030',  // 몸 노랑
+        dy: '#C09018',  // 어두운 노랑 (발, 꼬리 끝)
+        br: '#886030',  // 갈색 (등 줄무늬)
+        rd: '#E82010',  // 빨강 (볼터치)
+        bk: '#101010',  // 검정
+        wh: '#F8F8F8',  // 흰색 (눈 하이라이트)
+        cr: '#FEFED8',  // 크림색 (배)
     };
 
     // ── state ────────────────────────────────────────────────────────────────
@@ -95,7 +102,7 @@
             if (this.onGround && !this.ducking) {
                 this.vy = -17;
                 this.onGround = false;
-                burst(this.x, GROUND_Y, COLOR.playerBody, 7);
+                burst(this.x, GROUND_Y, PIK.y, 7);
             }
         },
 
@@ -147,99 +154,107 @@
         ctx.closePath();
     }
 
+    // ── draw Pikachu (standing / running) ────────────────────────────────────
     function drawStand(x, y, phase, air) {
-        // arms
-        ctx.strokeStyle = COLOR.playerBody;
-        ctx.lineWidth = 5;
-        ctx.lineCap = 'round';
-        const swing = Math.sin(phase) * 9;
-        if (air) {
-            line(x - 13, y - 36, x - 22, y - 48);
-            line(x + 13, y - 36, x + 22, y - 48);
-        } else {
-            line(x - 13, y - 36, x - 22 + swing, y - 26);
-            line(x + 13, y - 36, x + 22 - swing, y - 26);
-        }
+        const f = (gx, gy, w, h, c) => {
+            ctx.fillStyle = c;
+            ctx.fillRect((x + gx) | 0, (y + gy) | 0, w, h);
+        };
+        const ls = air ? 0 : Math.sin(phase) * 5;
+        const rs = air ? 0 : Math.sin(phase + Math.PI) * 5;
 
-        // body
-        ctx.fillStyle = COLOR.playerBody;
-        rr(x - 14, y - 46, 28, 34, 5); ctx.fill();
-        ctx.fillStyle = COLOR.playerDark;
-        rr(x - 14, y - 46 + 17, 28, 17, { tl:0, tr:0, bl:5, br:5 }); ctx.fill();
+        // 꼬리 (번개 모양, 오른쪽)
+        f(14, -36, 5, 4, PIK.y);
+        f(10, -32, 6, 4, PIK.y);
+        f(13, -28, 5, 4, PIK.y);
+        f(10, -24, 6, 4, PIK.y);
+        f(13, -20, 5, 6, PIK.dy);
 
-        // screen on chest
-        ctx.fillStyle = COLOR.playerScreen;
-        rr(x - 9, y - 42, 18, 12, 2); ctx.fill();
-        ctx.fillStyle = COLOR.promptGreen;
-        ctx.font = 'bold 9px Courier New';
-        ctx.textAlign = 'center';
-        ctx.fillText('>_', x, y - 33);
+        // 팔
+        const ay = air ? -34 : -26;
+        f(-18, ay, 6, 12, PIK.y);
+        f( 12, ay, 6, 12, PIK.y);
 
-        // head
-        ctx.fillStyle = COLOR.playerLight;
-        rr(x - 12, y - 64, 24, 22, 8); ctx.fill();
+        // 몸통
+        f(-13, -34, 26, 20, PIK.y);
+        f(-13, -26, 26,  4, PIK.br);   // 등 갈색 줄무늬
+        f( -7, -34, 14, 20, PIK.cr);   // 배 크림색
 
-        // eyes
-        ctx.fillStyle = '#0d1117';
-        circle(x - 4, y - 55, 3.2); ctx.fill();
-        circle(x + 7, y - 55, 3.2); ctx.fill();
-        ctx.fillStyle = 'white';
-        circle(x - 3, y - 56, 1.2); ctx.fill();
-        circle(x + 8, y - 56, 1.2); ctx.fill();
+        // 왼쪽 귀 (더 크게)
+        f(-12, -64, 8, 18, PIK.y);
+        f(-12, -64, 8,  6, PIK.bk);
 
-        // mouth (small smile)
-        ctx.strokeStyle = '#0d1117';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(x + 1.5, y - 49, 4, 0.1, Math.PI - 0.1);
-        ctx.stroke();
+        // 오른쪽 귀 (작게)
+        f(  3, -60, 7, 14, PIK.y);
+        f(  3, -60, 7,  5, PIK.bk);
 
-        // legs
-        ctx.strokeStyle = COLOR.playerDark;
-        ctx.lineWidth = 6;
-        ctx.lineCap = 'round';
-        const l1 = air ? 0 : Math.sin(phase) * 11;
-        const l2 = air ? 0 : Math.sin(phase + Math.PI) * 11;
-        if (air) {
-            line(x - 5, y - 12, x - 9, y - 4);
-            line(x + 5, y - 12, x + 9, y - 4);
-        } else {
-            line(x - 5, y - 12, x - 5 + l1, y);
-            line(x + 5, y - 12, x + 5 + l2, y);
-        }
+        // 머리
+        f(-13, -52, 26, 20, PIK.y);
+
+        // 볼터치 (빨강)
+        f(-13, -40, 7, 5, PIK.rd);
+        f(  6, -40, 7, 5, PIK.rd);
+
+        // 왼쪽 눈
+        f(-9, -49, 5, 6, PIK.bk);
+        f(-8, -51, 2, 3, PIK.wh);
+
+        // 오른쪽 눈
+        f( 4, -49, 5, 6, PIK.bk);
+        f( 5, -51, 2, 3, PIK.wh);
+
+        // 코
+        f(-2, -42, 4, 3, PIK.bk);
+
+        // 입
+        f(-5, -38, 4, 2, PIK.bk);
+        f( 1, -38, 4, 2, PIK.bk);
+
+        // 다리 (애니메이션)
+        f(-9 + (ls | 0), -14, 8, 14, PIK.y);
+        f( 1 + (rs | 0), -14, 8, 14, PIK.y);
+
+        // 발
+        f(-11 + (ls | 0), -3, 11, 4, PIK.dy);
+        f( -1 + (rs | 0), -3, 11, 4, PIK.dy);
     }
 
+    // ── draw Pikachu (ducking) ────────────────────────────────────────────────
     function drawDuck(x, y) {
-        // body
-        ctx.fillStyle = COLOR.playerBody;
-        rr(x - 20, y - 24, 40, 20, 5); ctx.fill();
-        ctx.fillStyle = COLOR.playerDark;
-        rr(x - 20, y - 24 + 10, 40, 10, { tl:0, tr:0, bl:5, br:5 }); ctx.fill();
+        const f = (gx, gy, w, h, c) => {
+            ctx.fillStyle = c;
+            ctx.fillRect((x + gx) | 0, (y + gy) | 0, w, h);
+        };
 
-        // screen
-        ctx.fillStyle = COLOR.playerScreen;
-        rr(x - 8, y - 21, 14, 8, 2); ctx.fill();
-        ctx.fillStyle = COLOR.promptGreen;
-        ctx.font = 'bold 7px Courier New';
-        ctx.textAlign = 'center';
-        ctx.fillText('>_', x - 1, y - 15);
+        // 몸통 (수평)
+        f(-18, -18, 30, 14, PIK.y);
+        f(-18, -16, 30,  4, PIK.br);
+        f(-16, -18, 20, 14, PIK.cr);
 
-        // head (side)
-        ctx.fillStyle = COLOR.playerLight;
-        rr(x + 12, y - 28, 18, 16, 6); ctx.fill();
+        // 머리 (측면, 오른쪽 바라봄)
+        f(10, -26, 18, 20, PIK.y);
 
-        // eye
-        ctx.fillStyle = '#0d1117';
-        circle(x + 25, y - 21, 2.5); ctx.fill();
-        ctx.fillStyle = 'white';
-        circle(x + 26, y - 22, 1); ctx.fill();
+        // 귀 (측면)
+        f(14, -38, 7, 14, PIK.y);
+        f(14, -38, 7,  5, PIK.bk);
 
-        // legs
-        ctx.strokeStyle = COLOR.playerDark;
-        ctx.lineWidth = 5;
-        ctx.lineCap = 'round';
-        line(x - 8, y - 4, x - 12, y);
-        line(x + 4, y - 4, x + 8, y);
+        // 눈
+        f(21, -22, 5, 6, PIK.bk);
+        f(22, -24, 2, 3, PIK.wh);
+
+        // 볼터치
+        f(19, -17, 6, 4, PIK.rd);
+
+        // 코
+        f(24, -19, 3, 2, PIK.bk);
+
+        // 다리
+        f(-14, -6, 8, 6, PIK.y);
+        f( -3, -6, 8, 6, PIK.y);
+
+        // 발
+        f(-15, -2, 10, 3, PIK.dy);
+        f( -4, -2, 10, 3, PIK.dy);
     }
 
     function circle(x, y, r) {
